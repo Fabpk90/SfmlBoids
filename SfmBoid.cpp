@@ -2,6 +2,7 @@
 //
 
 #include <SFML/Graphics.hpp>
+#include <SFML/System/Clock.hpp>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
@@ -10,43 +11,23 @@
 
 
 #include "Boid.h"
-
-constexpr int BOID_SIZE = 10;
-constexpr float PERCEPTION_RADIUS = 100.0f;
-
-struct Position
-{
-	glm::vec2 member;
-};
-
-struct Velocity
-{
-	glm::vec2 member;
-};
-
-struct Orientation
-{
-	float x;
-};
-
-struct Direction
-{
-	glm::vec2 member;
-};
+#include "Grid.h"
+#include "Utils.h"
 
 glm::vec2 getRandom2DDirection()
 {
 	static std::random_device rd; // obtain a random number from hardware
 	static std::mt19937 gen(rd()); // seed the generator
 
-	static std::uniform_real_distribution<> x(0, 1);
-	static std::uniform_real_distribution<> y(0, 1);
+	static std::uniform_real_distribution<> x(-1, 1);
+	static std::uniform_real_distribution<> y(-1, 1);
 	
 	return glm::vec2(x(gen), y(gen));
 }
 
 void alignBoid( std::vector<Direction>& directionsBoidNeigh, Velocity& vel)
 {
+	if(directionsBoidNeigh.empty()) return;
 	
 	glm::vec2 avgDirection{};
 
@@ -64,10 +45,12 @@ void alignBoid( std::vector<Direction>& directionsBoidNeigh, Velocity& vel)
 
 int main()
 {
+	Grid grid(BOID_SIZE * 5);
+	
 	entt::registry registry;
 	
-	sf::RenderWindow window(sf::VideoMode(800, 600), "My window");
-	window.setFramerateLimit(60);
+	sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Boids");
+	//window.setFramerateLimit(60);
 
 	std::random_device rd; // obtain a random number from hardware
 	std::mt19937 gen(rd()); // seed the generator
@@ -75,13 +58,16 @@ int main()
 	std::uniform_int_distribution<> widthRandom(0, 800 - 16);
 	std::uniform_int_distribution<> heightRandom(0, 600 - 16);
 	
-	for (int i = 0; i < BOID_SIZE; ++i)
+	for (int i = 0; i < BOID_COUNT; ++i)
 	{
 		const auto entity = registry.create();
-		registry.emplace<Position>(entity, glm::vec2(widthRandom(gen), heightRandom(gen)));
+		glm::vec2 randomPos(widthRandom(gen), heightRandom(gen));
+		registry.emplace<Position>(entity, randomPos);
 		registry.emplace<Velocity>(entity, glm::vec2(1.0f));
 		registry.emplace<Orientation>(entity, 0.f);
 		registry.emplace<Direction>(entity, getRandom2DDirection());
+
+		grid.addEntityAt(randomPos, entity);
 	}
 
 	sf::Texture tex;
@@ -90,16 +76,16 @@ int main()
 	sf::Sprite sprite(tex);
 	sprite.setScale(0.25f, 0.25f);
 
+	sf::Clock clock;
+	sf::Font font;
+	font.loadFromFile("Roboto.ttf");
+	
+	sf::Text text;
+	text.setFont(font);
+	text.setFillColor(sf::Color::Green);
+
 	while (window.isOpen())
 	{
-		sf::Event event;
-		while (window.pollEvent(event))
-		{
-			if (event.type == sf::Event::Closed
-				|| sf::Keyboard::isKeyPressed(sf::Keyboard::Escape))
-				window.close();
-		}
-
 		window.clear();
 
 		const auto boidSim = registry.view<Position, Velocity, Orientation, Direction>();
@@ -110,21 +96,40 @@ int main()
 			
 			std::vector<Direction> boidsNearDirection;
 
-			for(auto entity : boidSim)
+			/*for(auto entity : boidSim)
 			{
 				if(entity == ent) continue;
 				
 				Position& otherPos = boidSim.get<Position>(entity);
-				
 				
 				if(glm::length(otherPos.member - pos.member) < PERCEPTION_RADIUS)
 				{
 					auto& otherDir = boidSim.get<Direction>(entity);
 					boidsNearDirection.push_back(otherDir);
 				}
+			}*/
+
+			auto neighbor = grid.getEntitiesNear(pos.member);
+
+			for(auto& ent : neighbor)
+			{
+				auto& otherDir = boidSim.get<Direction>(ent);
+				boidsNearDirection.push_back(otherDir);
 			}
 
 			alignBoid(boidsNearDirection, vel);
+
+			pos.member += vel.member;
+
+			if (pos.member.x < 0)
+				pos.member.x = window.getSize().x - 16.0f;
+			else if (pos.member.x > window.getSize().x)
+				pos.member.x = 0;
+
+			if (pos.member.y < 0)
+				pos.member.y = window.getSize().y - 16.0f;
+			else if (pos.member.y > window.getSize().y)
+				pos.member.y = 0;
 		});
 
 
@@ -135,7 +140,22 @@ int main()
 
 			window.draw(sprite);
 		});
+
+		auto time = clock.restart();
+		float framerate = 1 / time.asSeconds();
+		
+
+		text.setString(std::to_string(framerate));
+		window.draw(text);
 		
 		window.display();
+
+		sf::Event event;
+		while (window.pollEvent(event))
+		{
+			if (event.type == sf::Event::Closed
+				|| sf::Keyboard::isKeyPressed(sf::Keyboard::Escape))
+				window.close();
+		}
 	}
 }
